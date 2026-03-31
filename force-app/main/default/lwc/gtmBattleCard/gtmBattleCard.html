@@ -1,0 +1,173 @@
+<template>
+    <lightning-card title="GTM Battle Card" icon-name="custom:custom85">
+
+        <!-- Loading spinner while enrichment is in progress -->
+        <template lwc:if={isEnriching}>
+            <div class="slds-align_absolute-center slds-p-around_large">
+                <lightning-spinner alternative-text="Enriching account..." size="medium"></lightning-spinner>
+                <p class="slds-m-top_medium slds-text-color_weak">Generating battle card, please wait...</p>
+            </div>
+        </template>
+
+        <!-- Error state -->
+        <template lwc:elseif={hasError}>
+            <div class="slds-p-around_medium">
+                <div class="slds-notify slds-notify_alert slds-theme_error" role="alert">
+                    <span class="slds-assistive-text">Error</span>
+                    <h2>{errorMessage}</h2>
+                </div>
+                <div class="slds-m-top_medium slds-align_absolute-center">
+                    <lightning-button
+                        label="Retry Enrichment"
+                        variant="brand"
+                        onclick={handleEnrich}>
+                    </lightning-button>
+                </div>
+            </div>
+        </template>
+
+        <!-- Not enriched state -->
+        <template lwc:elseif={isNotEnriched}>
+            <div class="slds-align_absolute-center slds-p-around_large gtm-empty-state">
+                <lightning-icon icon-name="custom:custom85" size="large" class="slds-m-bottom_medium"></lightning-icon>
+                <h3 class="slds-text-heading_small slds-m-bottom_small">No enrichment data yet</h3>
+                <p class="slds-text-color_weak slds-m-bottom_medium">
+                    Click below to generate an AI-powered battle card for this account.
+                </p>
+                <lightning-button
+                    label="Enrich Account"
+                    variant="brand"
+                    icon-name="utility:magicwand"
+                    onclick={handleEnrich}>
+                </lightning-button>
+            </div>
+        </template>
+
+        <!-- Enriched state -->
+        <template lwc:elseif={isEnriched}>
+            <!-- Header bar -->
+            <div class="gtm-header slds-p-horizontal_medium slds-p-vertical_small">
+                <div class="slds-grid slds-gutters slds-grid_align-spread slds-grid_vertical-align-center">
+                    <div class="slds-col">
+                        <span class="slds-text-color_weak slds-text-body_small">
+                            Last enriched: {formattedLastEnriched}
+                        </span>
+                        <template lwc:if={runId}>
+                            <span class="slds-m-left_small slds-text-color_weak slds-text-body_small">
+                                Run: {runId}
+                            </span>
+                        </template>
+                    </div>
+                    <div class="slds-col slds-col_bump-left slds-grid slds-grid_vertical-align-center">
+                        <span class="gtm-score-badge slds-m-right_medium">
+                            Confidence: {confidenceScore}%
+                        </span>
+                        <lightning-button
+                            label="Re-enrich"
+                            variant="neutral"
+                            icon-name="utility:refresh"
+                            size="small"
+                            onclick={handleEnrich}>
+                        </lightning-button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabs -->
+            <lightning-tabset>
+
+                <lightning-tab label="Company Overview" value="overview">
+                    <div class="slds-p-around_medium">
+                        <p class="slds-text-body_regular">{battleCard.GTM_Company_Overview__c}</p>
+                    </div>
+                </lightning-tab>
+
+                <lightning-tab label="Strategy" value="strategy">
+                    <div class="slds-p-around_medium">
+                        <h4 class="slds-text-heading_small slds-m-bottom_small">Recommended Approach</h4>
+                        <p class="slds-text-body_regular slds-m-bottom_medium">
+                            {battleCard.GTM_Recommended_Approach__c}
+                        </p>
+                        <h4 class="slds-text-heading_small slds-m-bottom_small">Talking Points</h4>
+                        <ul class="slds-list_dotted">
+                            <template for:each={talkingPoints} for:item="point">
+                                <li key={point} class="slds-item">{point}</li>
+                            </template>
+                        </ul>
+                    </div>
+                </lightning-tab>
+
+                <lightning-tab label="Competitive" value="competitive">
+                    <div class="slds-p-around_medium">
+                        <p class="slds-text-body_regular">{battleCard.GTM_Competitive_Positioning__c}</p>
+                    </div>
+                </lightning-tab>
+
+                <lightning-tab label="Risks &amp; Objections" value="risks">
+                    <div class="slds-p-around_medium">
+                        <ul class="slds-list_dotted">
+                            <template for:each={risks} for:item="risk">
+                                <li key={risk} class="slds-item">{risk}</li>
+                            </template>
+                        </ul>
+                    </div>
+                </lightning-tab>
+
+                <lightning-tab label="Next Steps" value="nextsteps">
+                    <div class="slds-p-around_medium">
+                        <ul class="slds-list_dotted">
+                            <template for:each={nextSteps} for:item="step">
+                                <li key={step} class="slds-item">{step}</li>
+                            </template>
+                        </ul>
+                    </div>
+                </lightning-tab>
+
+                <lightning-tab label="Contacts" value="contacts">
+                    <div class="slds-p-around_medium">
+                        <template lwc:if={hasContacts}>
+                            <div class="slds-m-bottom_medium">
+                                <template for:each={contacts} for:item="contact">
+                                    <div key={contact.id} class="slds-box slds-m-bottom_small gtm-contact-card">
+                                        <div class="slds-grid slds-gutters slds-grid_vertical-align-center">
+                                            <div class="slds-col slds-size_1-of-12">
+                                                <lightning-input
+                                                    type="checkbox"
+                                                    label=""
+                                                    name={contact.id}
+                                                    checked={contact.selected}
+                                                    data-id={contact.id}
+                                                    onchange={handleContactSelect}>
+                                                </lightning-input>
+                                            </div>
+                                            <div class="slds-col slds-size_11-of-12">
+                                                <p class="slds-text-heading_small">{contact.name}</p>
+                                                <p class="slds-text-body_small slds-text-color_weak">{contact.title}</p>
+                                                <p class="slds-text-body_small">{contact.email}</p>
+                                                <template lwc:if={contact.phone}>
+                                                    <p class="slds-text-body_small">{contact.phone}</p>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                            <lightning-button
+                                label="Create Selected Contacts"
+                                variant="brand"
+                                icon-name="utility:add"
+                                onclick={handleCreateContacts}
+                                disabled={noContactsSelected}>
+                            </lightning-button>
+                        </template>
+                        <template lwc:else>
+                            <p class="slds-text-color_weak">No contact data available. Re-enrich to fetch contacts.</p>
+                        </template>
+                    </div>
+                </lightning-tab>
+
+            </lightning-tabset>
+        </template>
+
+    </lightning-card>
+</template>

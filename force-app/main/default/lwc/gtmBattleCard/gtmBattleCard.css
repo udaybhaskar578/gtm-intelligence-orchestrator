@@ -1,0 +1,27 @@
+.gtm-empty-state {
+    flex-direction: column;
+    text-align: center;
+    padding: 2rem;
+}
+
+.gtm-header {
+    background-color: var(--slds-g-color-neutral-base-95, #f3f3f3);
+    border-bottom: 1px solid var(--slds-g-color-border-base-1, #dddbda);
+}
+
+.gtm-score-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.2rem 0.75rem;
+    border-radius: 999px;
+    background-color: var(--slds-g-color-brand-base-50, #0070d2);
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 0.8rem;
+}
+
+.gtm-contact-card {
+    background-color: var(--slds-g-color-neutral-base-100, #ffffff);
+    border: 1px solid var(--slds-g-color-border-base-1, #dddbda);
+    border-radius: 0.25rem;
+}
