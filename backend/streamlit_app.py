@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
 from uuid import uuid4
 
 import streamlit as st
@@ -11,9 +9,10 @@ import streamlit as st
 from src.data_sources import DataSourceOrchestrator
 from src.models import AnalysisRequest
 from src.orchestrator import GTMOrchestrator
+from src.pipeline import run_analysis_pipeline
 from src.salesforce import SalesforceClient
 from src.settings import get_settings
-from src.utils import save_json_file
+from src.utils import domain_from_website, save_json_file
 
 
 st.set_page_config(page_title="GTM Orchestrator", page_icon=":bar_chart:", layout="wide")
@@ -23,21 +22,6 @@ st.caption("Select a Salesforce Account, process enrichment + battle card, write
 
 def _run_async(coro):
     return asyncio.run(coro)
-
-
-def _domain_from_website(website: str | None) -> str | None:
-    if not website:
-        return None
-    raw = website.strip()
-    if not raw:
-        return None
-    if not raw.startswith(("http://", "https://")):
-        raw = f"https://{raw}"
-    parsed = urlparse(raw)
-    host = parsed.netloc.lower().strip()
-    if host.startswith("www."):
-        host = host[4:]
-    return host or None
 
 
 async def _fetch_accounts(limit: int) -> list[dict]:
@@ -57,7 +41,7 @@ async def _process_account(account: dict) -> dict:
         account_id=account["Id"],
         company_name=account.get("Name") or "Unknown Account",
         industry=account.get("Industry"),
-        domain=_domain_from_website(account.get("Website")),
+        domain=domain_from_website(account.get("Website")),
         write_to_salesforce=True,
         include_raw_intelligence=True,
     )
@@ -66,32 +50,11 @@ async def _process_account(account: dict) -> dict:
     orch = GTMOrchestrator(settings)
     sf = SalesforceClient(settings)
     try:
-        intelligence, source_status = await ds.fetch_all_sources(request, run_id=run_id)
-        battle_card = await orch.synthesize_battle_card(
-            request,
-            intelligence,
-            source_status,
-            run_id=run_id,
-        )
-        readable_md = await orch.format_battle_card_markdown(battle_card, run_id=run_id)
-        writeback = await sf.update_account_with_battle_card(
-            account_id=request.account_id,
-            battle_card=battle_card,
-            run_id=run_id,
-        )
+        response = await run_analysis_pipeline(request, ds, orch, sf, run_id, settings)
+        readable_md = await orch.format_battle_card_markdown(response.battle_card, run_id=run_id)
 
-        payload = {
-            "run_id": run_id,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "request": request.model_dump(mode="json"),
-            "source_status": {
-                key: value.model_dump(mode="json") for key, value in source_status.items()
-            },
-            "battle_card": battle_card.model_dump(mode="json"),
-            "readable_markdown": readable_md,
-            "salesforce_writeback": writeback.model_dump(mode="json"),
-            "raw_intelligence": intelligence.raw_data,
-        }
+        payload = response.model_dump(mode="json")
+        payload["readable_markdown"] = readable_md
         output_path = save_json_file(
             payload,
             Path(settings.output_dir),

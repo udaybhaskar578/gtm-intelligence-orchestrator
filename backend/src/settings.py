@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     )
     sf_domain: Optional[str] = Field(default=None, validation_alias=AliasChoices("SF_DOMAIN"))
     salesforce_battle_card_field: str = Field(
-        default="Battle_Card_JSON__c", alias="SALESFORCE_BATTLE_CARD_FIELD"
+        default="GTM_Battle_Card_JSON__c", alias="SALESFORCE_BATTLE_CARD_FIELD"
     )
     salesforce_summary_field: str = Field(default="Description", alias="SALESFORCE_SUMMARY_FIELD")
 

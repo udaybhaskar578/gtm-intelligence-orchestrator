@@ -12,11 +12,11 @@ from fastapi.responses import JSONResponse
 
 from .data_sources import DataSourceOrchestrator
 from .logging_config import configure_logging, get_logger
-from .models import AnalysisRequest, AnalyzeAccountResponse, SalesforceWritebackStatus
+from .models import AnalysisRequest, AnalyzeAccountResponse
 from .orchestrator import GTMOrchestrator
+from .pipeline import run_analysis_pipeline
 from .salesforce import SalesforceClient
 from .settings import Settings, get_settings
-from .utils import save_json_file
 
 
 @asynccontextmanager
@@ -70,41 +70,14 @@ async def analyze_account(request_body: AnalysisRequest, request: Request) -> An
     settings: Settings = request.app.state.settings
 
     try:
-        data_sources: DataSourceOrchestrator = request.app.state.data_sources
-        orchestrator: GTMOrchestrator = request.app.state.orchestrator
-        salesforce: SalesforceClient = request.app.state.salesforce
-
-        intelligence, source_status = await data_sources.fetch_all_sources(request_body, run_id=run_id)
-        battle_card = await orchestrator.synthesize_battle_card(
+        return await run_analysis_pipeline(
             request_body,
-            intelligence,
-            source_status,
-            run_id=run_id,
+            request.app.state.data_sources,
+            request.app.state.orchestrator,
+            request.app.state.salesforce,
+            run_id,
+            settings,
         )
-
-        salesforce_status = SalesforceWritebackStatus(
-            attempted=False,
-            success=False,
-            account_id=request_body.account_id,
-            error="Not attempted",
-        )
-        if request_body.write_to_salesforce and settings.use_salesforce_write_back:
-            salesforce_status = await salesforce.update_account_with_battle_card(
-                account_id=request_body.account_id,
-                battle_card=battle_card,
-                run_id=run_id,
-            )
-
-        response_payload = AnalyzeAccountResponse(
-            run_id=run_id,
-            battle_card=battle_card,
-            source_status=source_status,
-            salesforce_writeback=salesforce_status,
-            raw_intelligence=intelligence.raw_data if request_body.include_raw_intelligence else None,
-            top_contacts=intelligence.top_contacts,
-        )
-        _persist_output_if_enabled(settings, response_payload, run_id)
-        return response_payload
     except Exception as exc:
         logger.error("Unhandled pipeline failure: %s", exc)
         logger.debug(traceback.format_exc())
@@ -122,12 +95,6 @@ async def http_exception_handler(_request: Request, exc: HTTPException):
 
 def _ensure_output_dir(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
-
-
-def _persist_output_if_enabled(settings: Settings, response: AnalyzeAccountResponse, run_id: str) -> None:
-    if not settings.persist_output:
-        return
-    save_json_file(response.model_dump(mode="json"), settings.output_dir, f"{run_id}.json")
 
 
 def _run_startup_checks(settings: Settings, logger) -> None:

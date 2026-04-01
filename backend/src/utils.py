@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Iterable
+from urllib.parse import urlparse
 
 import httpx
 
@@ -110,6 +111,22 @@ def save_json_file(data: dict[str, Any], output_dir: Path, file_name: str) -> Pa
     with path.open("w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=2, default=_json_serializer)
     return path
+
+
+def domain_from_website(url: str | None) -> str | None:
+    """Extract the bare hostname from a website URL, stripping www. prefix."""
+    if not url:
+        return None
+    raw = url.strip()
+    if not raw:
+        return None
+    if not raw.startswith(("http://", "https://")):
+        raw = f"https://{raw}"
+    parsed = urlparse(raw)
+    host = parsed.netloc.lower().strip()
+    if host.startswith("www."):
+        host = host[4:]
+    return host or None
 
 
 def _json_serializer(value: Any) -> Any:
