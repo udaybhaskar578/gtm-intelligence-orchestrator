@@ -2,6 +2,17 @@
 
 AI-powered sales battle card generator integrated natively into Salesforce. Click a button on any Account record to pull enrichment data from Apollo.io, synthesize it through GPT-4.1, and write a structured battle card back to Salesforce — all in under 60 seconds.
 
+---
+
+## Try It Live
+
+**[Launch the Streamlit Demo](https://udaybhaskar578-gtm-intelligence-orchestrator.streamlit.app)**
+Run a live enrichment pipeline against any Salesforce account — no setup required.
+
+> To test the full Salesforce integration, reach out to [udaybhaskar578@gmail.com](mailto:udaybhaskar578@gmail.com) for demo credentials.
+
+---
+
 ## Live Deployments
 
 | Component | URL |
