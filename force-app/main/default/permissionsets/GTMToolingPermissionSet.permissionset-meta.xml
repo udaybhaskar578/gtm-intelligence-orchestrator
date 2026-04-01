@@ -2,7 +2,7 @@
 <PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">
     <fieldPermissions>
         <editable>true</editable>
-        <field>Account.Battle_Card_JSON__c</field>
+        <field>Account.GTM_Battle_Card_JSON__c</field>
         <readable>true</readable>
     </fieldPermissions>
     <fieldPermissions>

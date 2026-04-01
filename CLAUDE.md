@@ -121,7 +121,7 @@ gtmBattleCard LWC displays tabbed panel (Overview, Strategy, Competitive, Risks,
 | `GTM_Last_Enriched__c` | DateTime | timestamp of last enrichment |
 | `GTM_Run_ID__c` | Text | run_id UUID for tracing |
 | `GTM_Contacts_JSON__c` | LongTextArea | top_contacts raw JSON array |
-| `Battle_Card_JSON__c` | LongTextArea | full battle card JSON blob (optional) |
+| `GTM_Battle_Card_JSON__c` | LongTextArea | full battle card JSON blob (optional) |
 
 ### Named Credential
 

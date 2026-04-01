@@ -4,5 +4,5 @@
     <description>GTM Intelligence Python backend server</description>
     <disableProtocolSecurity>false</disableProtocolSecurity>
     <isActive>true</isActive>
-    <url>http://localhost:8000</url>
+    <url>https://gsmwcf7uy7.execute-api.us-east-1.amazonaws.com</url>
 </RemoteSiteSetting>
