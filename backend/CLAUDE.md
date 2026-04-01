@@ -1,100 +1,149 @@
-# CLAUDE.md
+# CLAUDE.md — Backend
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with code in the `backend/` directory.
 
 ## What This Project Does
 
-A FastAPI service that generates AI-powered sales "battle cards" for a given Salesforce account. It fetches company enrichment data and contact data from Apollo.io (real API), call intelligence from Gong (mocked), then synthesizes them via an LLM (GitHub Models / OpenAI-compatible) into a structured battle card, optionally writing results back to Salesforce.
+A FastAPI service that generates AI-powered sales "battle cards" for a given Salesforce account. It fetches company enrichment data and contacts from Apollo.io (real API), call intelligence from Gong (mocked), synthesizes them via GitHub Models (GPT-4.1), and optionally writes results back to Salesforce.
+
+Also includes a Streamlit UI for interactive testing without touching Salesforce directly.
+
+**Production deployments:**
+- FastAPI: AWS Lambda + API Gateway — `https://gsmwcf7uy7.execute-api.us-east-1.amazonaws.com`
+- Streamlit: Streamlit Community Cloud — `https://udaybhaskar578-gtm-intelligence-orchestrator.streamlit.app`
+
+---
 
 ## Commands
 
-### Setup
+### Local dev setup
 ```bash
-python -m venv .venv
+cd backend
+python3.13 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env   # fill in credentials
+uvicorn main:app --reload --port 8000
 ```
 
-### Run the server
+### Run Streamlit UI locally
 ```bash
-uvicorn main:app --reload
+source .venv/bin/activate
+streamlit run streamlit_app.py
 ```
 
-### Run all tests
+### Run tests
 ```bash
 pytest
-```
-
-### Run a single test file
-```bash
-pytest tests/test_models.py
+pytest tests/test_models.py -v
 pytest tests/test_orchestrator.py -v
 ```
 
-### Run a single test
+### Deploy to Lambda (after code changes)
 ```bash
-pytest tests/test_models.py::test_battle_card_draft_enforces_minimum_items
+cd backend
+cp -r src package/
+cp lambda_handler.py package/
+cd package && zip -r ../lambda.zip . -x "*.pyc" -x "*/__pycache__/*" && cd ..
+aws lambda update-function-code \
+  --function-name gtm-intelligence-api \
+  --zip-file "fileb://$(pwd)/lambda.zip" \
+  --region us-east-1
 ```
 
-## Environment Variables (`.env`)
+### Build Lambda package from scratch (cross-platform — must use --platform flag)
+```bash
+rm -rf package lambda.zip
+python3.13 -m pip install -r requirements-lambda.txt \
+  --target ./package \
+  --platform manylinux2014_x86_64 \
+  --python-version 3.13 \
+  --only-binary=:all:
+cp -r src package/
+cp lambda_handler.py package/
+cd package && zip -r ../lambda.zip . -x "*.pyc" -x "*/__pycache__/*" && cd ..
+```
+
+> Always use `--platform manylinux2014_x86_64 --only-binary=:all:` when building on macOS.
+> Lambda runs Amazon Linux — macOS Darwin `.so` files will cause `No module named pydantic_core._pydantic_core`.
+
+---
+
+## Environment Variables
 
 Always required:
-- `GITHUB_MODELS_TOKEN` — API token for GitHub Models (OpenAI-compatible LLM endpoint)
+- `GITHUB_MODELS_TOKEN` — GitHub PAT with `models:read` scope
 
-To run without external APIs (development/testing):
-- `USE_APOLLO_REAL_API=false` — skips Apollo enrichment and contacts, uses mock/empty data
-- `USE_SALESFORCE_WRITE_BACK=false` — skips Salesforce write-back
+Apollo enrichment:
+- `USE_APOLLO_REAL_API` — `true` (default) or `false` to use mock data
+- `APOLLO_API_KEY` — required when `USE_APOLLO_REAL_API=true`
 
-When `USE_APOLLO_REAL_API=true` (default):
-- `APOLLO_API_KEY` — get one at apollo.io (free tier, accepts personal email)
+Salesforce write-back:
+- `USE_SALESFORCE_WRITE_BACK` — `true` (default) or `false` to skip
+- `SALESFORCE_CLIENT_ID`, `SALESFORCE_CLIENT_SECRET`
+- `SALESFORCE_USERNAME`, `SALESFORCE_PASSWORD`, `SALESFORCE_SECURITY_TOKEN`
+- `SALESFORCE_AUTH_BASE_URL` — `https://login.salesforce.com` (use `https://test.salesforce.com` for sandboxes)
 
-When `USE_SALESFORCE_WRITE_BACK=true`:
-- `SF_CONSUMER_KEY` / `SALESFORCE_CLIENT_ID`
-- `SF_CONSUMER_SECRET` / `SALESFORCE_CLIENT_SECRET`
-- `SF_USERNAME` / `SALESFORCE_USERNAME`
-- `SF_PASSWORD` / `SALESFORCE_PASSWORD`
-- `SF_SECURITY_TOKEN` (optional, appended to password)
-- `SF_DOMAIN` (optional — `login`, `test`, or custom domain)
-
-Other notable settings with defaults:
+LLM settings (all have defaults):
 - `GITHUB_MODELS_MODEL` — default `openai/gpt-4.1`
-- `GITHUB_MODELS_TIMEOUT_SECONDS` — default `45.0`
+- `GITHUB_MODELS_TIMEOUT_SECONDS` — default `45`
 - `GITHUB_MODELS_TEMPERATURE` — default `0.2`
 - `GITHUB_MODELS_MAX_TOKENS` — default `1400`
-- `APOLLO_ENRICH_BASE_URL` — default `https://api.apollo.io/api/v1`
-- `APOLLO_TIMEOUT_SECONDS` — default `20.0`
-- `APOLLO_MAX_RETRIES` — default `2`
-- `MOCK_MODE` — `deterministic` (default, seeded by company name) or `random`
-- `MOCK_SEED` — integer seed for deterministic mock data, default `42`
-- `PERSIST_OUTPUT` — `true` by default; saves `output/battle_card_results/{run_id}.json`
-- `STARTUP_PROVIDER_CHECK` — `false` by default; when `true`, pings external endpoints on startup
+
+Lambda-specific settings:
+- `PERSIST_OUTPUT=false` — Lambda has no persistent disk at relative paths
+- `OUTPUT_DIR=/tmp/battle_card_results` — only writable directory on Lambda
+- `STARTUP_PROVIDER_CHECK=false` — avoid cold-start latency
+
+Other:
+- `MOCK_MODE` — `deterministic` (default, seeded) or `random`
+- `MOCK_SEED` — integer seed, default `42`
 - `SALESFORCE_API_VERSION` — default `v61.0`
-- `SALESFORCE_BATTLE_CARD_FIELD` — Salesforce field for JSON output, default `Battle_Card_JSON__c`
-- `SALESFORCE_SUMMARY_FIELD` — Salesforce field for summary text, default `Description`
+- `SALESFORCE_BATTLE_CARD_FIELD` — default `Battle_Card_JSON__c`
+- `SALESFORCE_SUMMARY_FIELD` — default `Description`
+
+---
 
 ## Architecture
 
-The request lifecycle for `POST /v1/analyze-account`:
+Request lifecycle for `POST /v1/analyze-account`:
 
-1. **`src/api.py`** — FastAPI app entry point. The `lifespan` context manager initializes all service clients at startup (with optional provider reachability checks) and tears them down on shutdown. The single main endpoint orchestrates the pipeline.
+1. **`src/api.py`** — FastAPI app. `lifespan` initializes all service clients at startup. Single main endpoint orchestrates the pipeline.
 
 2. **`src/data_sources.py`** — `DataSourceOrchestrator.fetch_all_sources()` fans out concurrently:
-   - `ApolloEnrichmentClient` — real `GET /organizations/enrich` call to Apollo.io API; falls back to a deterministic mock if disabled or the call fails. Returns `technology_names`, `keywords`, `estimated_num_employees`, `funding_events`, etc.
-   - `ApolloContactsClient` — real `POST /contacts/search` call to Apollo.io API; falls back to `POST /mixed_people/api_search` if the first endpoint fails. Returns empty list when `USE_APOLLO_REAL_API=false`.
-   - `GongMockDataSource` — generates deterministic mock call intelligence (seeded by company name)
+   - `ApolloEnrichmentClient` — `GET /organizations/enrich`; falls back to deterministic mock on failure
+   - `ApolloContactsClient` — `POST /contacts/search`; falls back to `/mixed_people/api_search`; returns empty when disabled
+   - `GongMockDataSource` — deterministic mock call intelligence seeded by company name
 
-3. **`src/orchestrator.py`** — `GTMOrchestrator.synthesize_battle_card()` calls the GitHub Models API (via the `openai` SDK pointed at a custom base URL) with a structured JSON prompt. If the LLM fails or returns invalid JSON, it falls back to a `_fallback_draft()` built deterministically from the aggregated intelligence.
+3. **`src/orchestrator.py`** — `GTMOrchestrator.synthesize_battle_card()` calls GitHub Models API (via `openai` SDK at custom base URL). Falls back to `_fallback_draft()` on LLM failure or invalid JSON.
 
-4. **`src/salesforce.py`** — `SalesforceClient` authenticates via OAuth password flow and PATCHes the Account record. Token is cached in-memory; re-authenticates once on 401.
+4. **`src/salesforce.py`** — `SalesforceClient` authenticates via OAuth password flow and PATCHes the Account. Token cached in-memory; re-authenticates on 401.
 
-5. **`src/settings.py`** — `Settings` (pydantic-settings) loads from `.env`. Field aliases allow multiple env var names (e.g. `SF_CONSUMER_KEY` or `SALESFORCE_CLIENT_ID`). Validation enforces required fields based on which integrations are enabled.
+5. **`src/settings.py`** — `Settings` (pydantic-settings) loads from `.env`. Field aliases allow multiple env var names. Validates required fields per enabled integration.
 
-6. **`src/models.py`** — All Pydantic models. `BattleCardDraft` is the intermediate LLM output (validated before becoming a `BattleCard`). `SourceStatus` tracks per-provider success/degraded/failed state.
+6. **`src/models.py`** — All Pydantic models. `BattleCardDraft` is the intermediate LLM output validated before becoming `BattleCard`. `SourceStatus` tracks per-provider success/degraded/failed state.
 
-7. **`src/utils.py`** — `retry_http_request` wraps httpx with exponential backoff. `extract_json_object` strips markdown fences and extracts JSON from LLM output. `coerce_list` / `coerce_int` normalize Apollo API response variations.
+7. **`src/utils.py`** — `retry_http_request` (exponential backoff), `extract_json_object` (strips markdown fences from LLM output), `coerce_list` / `coerce_int` (normalize Apollo response variations).
 
-8. **`src/logging_config.py`** — `configure_logging()` sets up structured log format including `run_id` in every line. `get_logger(name, run_id)` returns a `LoggerAdapter` used throughout the codebase.
+8. **`src/logging_config.py`** — Structured logging with `run_id` in every line via `LoggerAdapter`.
+
+**Entry points:**
+- `main.py` — Uvicorn entry point for local dev
+- `lambda_handler.py` — AWS Lambda entry point (Mangum wrapper around FastAPI app)
+- `streamlit_app.py` — Streamlit UI
+
+**Dependency files:**
+- `requirements.txt` — full deps including Streamlit and pytest (local dev)
+- `requirements-lambda.txt` — Lambda-only deps, excludes Streamlit and pytest (keeps zip small)
+
+---
 
 ## Testing Notes
 
-Tests require at minimum `GITHUB_MODELS_TOKEN` set (and `USE_APOLLO_REAL_API=false`, `USE_SALESFORCE_WRITE_BACK=false` unless you have real credentials). `test_orchestrator.py` and `test_api.py` inject fake OpenAI clients to avoid real LLM calls. `pytest-asyncio` is used for async tests.
+Tests require at minimum `GITHUB_MODELS_TOKEN` set, and `USE_APOLLO_REAL_API=false`, `USE_SALESFORCE_WRITE_BACK=false` unless you have real credentials. `test_orchestrator.py` and `test_api.py` inject fake OpenAI clients to avoid real LLM calls. Uses `pytest-asyncio` for async tests.
+
+---
+
+## Python Version
+
+Use Python 3.11–3.13. Python 3.14 is not supported — `pydantic-core` build fails (`PyO3` max supported version is 3.13). Streamlit Community Cloud is pinned to 3.11 via `.python-version`.
