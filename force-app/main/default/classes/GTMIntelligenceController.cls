@@ -89,7 +89,7 @@ public with sharing class GTMIntelligenceController {
     @AuraEnabled
     public static List<Id> createContacts(Id accountId, String contactsJson) {
         List<Object> raw = (List<Object>) JSON.deserializeUntyped(contactsJson);
-        List<Contact> toInsert = new List<Contact>();
+        List<Contact> newContacts = new List<Contact>();
 
         for (Object item : raw) {
             Map<String, Object> c = (Map<String, Object>) item;
@@ -100,13 +100,13 @@ public with sharing class GTMIntelligenceController {
             con.Email      = (String) c.get('email');
             con.Title      = (String) c.get('title');
             con.Phone      = (String) c.get('phone');
-            toInsert.add(con);
+            newContacts.add(con);
         }
 
-        insert toInsert;
+        insert newContacts;
 
         List<Id> createdIds = new List<Id>();
-        for (Contact con : toInsert) {
+        for (Contact con : newContacts) {
             createdIds.add(con.Id);
         }
         return createdIds;

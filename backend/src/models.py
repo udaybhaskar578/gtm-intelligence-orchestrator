@@ -32,6 +32,7 @@ class CompanyIntel(BaseModel):
     company_name: str
     industry: str
     employee_count: int = Field(default=0, ge=0)
+    primary_domain: Optional[str] = None
     funding_stage: Optional[str] = None
     revenue_range: Optional[str] = None
     technologies: list[str] = Field(default_factory=list)

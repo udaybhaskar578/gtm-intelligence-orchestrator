@@ -119,10 +119,20 @@ class ApolloEnrichmentClient:
 
         revenue = record.get("annual_revenue")
 
+        # Apollo returns the authoritative root domain for the company (e.g. "stripe.com").
+        # Prefer this over the domain supplied in the request — it's cleaner and more reliable
+        # for downstream queries like the contacts search.
+        primary_domain = (
+            record.get("primary_domain")
+            or record.get("website_url")
+            or request.domain
+        )
+
         return CompanyIntel(
             company_name=company_name,
             industry=industry,
             employee_count=coerce_int(record.get("estimated_num_employees"), fallback=0),
+            primary_domain=primary_domain,
             funding_stage=latest_event.get("type"),
             revenue_range=str(revenue) if revenue else None,
             technologies=coerce_list(record.get("technology_names")),
@@ -257,52 +267,15 @@ class ApolloContactsClient:
         safe_limit = max(1, min(limit, 25))
         base_url = self.settings.apollo_enrich_base_url.rstrip("/")
 
-        search_payload = {
-            "q_organization_name": company_name,
-            "per_page": safe_limit,
-            "page": 1,
-        }
+        # /mixed_people/search searches Apollo's global people database.
+        # /contacts/search only searches contacts already imported into your Apollo CRM account
+        # and will return empty for most orgs — do not use it here.
+        people_url = f"{base_url}/mixed_people/search"
+        search_payload: dict[str, Any] = {"per_page": safe_limit, "page": 1}
         if domain:
             search_payload["q_organization_domains"] = [domain]
-
-        contacts_url = f"{base_url}/contacts/search"
-        errors: list[str] = []
-
-        try:
-            response = await retry_http_request(
-                self.client,
-                "POST",
-                contacts_url,
-                headers=headers,
-                json=search_payload,
-                retries=self.settings.apollo_max_retries,
-            )
-            body = response.json()
-            records = body.get("contacts") or body.get("people") or []
-            contacts = self._map_contacts(records, company_name, safe_limit)
-            latency = elapsed_ms(start)
-            return (
-                contacts,
-                SourceStatus(
-                    provider="apollo_contacts",
-                    status="success" if contacts else "degraded",
-                    used_mock=False,
-                    latency_ms=latency,
-                    error=None if contacts else "No contacts returned from /contacts/search",
-                ),
-                {"endpoint": "/contacts/search", "payload": search_payload, "response": body},
-            )
-        except Exception as exc:
-            errors.append(f"/contacts/search: {exc}")
-            logger.warning("Apollo contacts search failed: %s", exc)
-
-        # Fallback to net-new people search for contact-like output.
-        people_url = f"{base_url}/mixed_people/api_search"
-        people_payload = {"per_page": safe_limit, "page": 1}
-        if domain:
-            people_payload["q_organization_domains"] = [domain]
         else:
-            people_payload["q_organization_name"] = company_name
+            search_payload["q_organization_name"] = company_name
 
         try:
             response = await retry_http_request(
@@ -310,13 +283,14 @@ class ApolloContactsClient:
                 "POST",
                 people_url,
                 headers=headers,
-                json=people_payload,
+                json=search_payload,
                 retries=self.settings.apollo_max_retries,
             )
             body = response.json()
             records = body.get("people") or body.get("contacts") or []
             contacts = self._map_contacts(records, company_name, safe_limit)
             latency = elapsed_ms(start)
+            logger.info("Apollo people search returned %d contacts for %s.", len(contacts), company_name)
             return (
                 contacts,
                 SourceStatus(
@@ -324,12 +298,12 @@ class ApolloContactsClient:
                     status="success" if contacts else "degraded",
                     used_mock=False,
                     latency_ms=latency,
-                    error=None if contacts else "No people returned from /mixed_people/api_search",
+                    error=None if contacts else "No people returned from /mixed_people/search",
                 ),
-                {"endpoint": "/mixed_people/api_search", "payload": people_payload, "response": body},
+                {"endpoint": "/mixed_people/search", "payload": search_payload, "response": body},
             )
         except Exception as exc:
-            errors.append(f"/mixed_people/api_search: {exc}")
+            logger.warning("Apollo people search failed: %s", exc)
             latency = elapsed_ms(start)
             return (
                 [],
@@ -338,9 +312,9 @@ class ApolloContactsClient:
                     status="failed",
                     used_mock=False,
                     latency_ms=latency,
-                    error=" | ".join(errors)[:400],
+                    error=str(exc)[:400],
                 ),
-                {"errors": errors},
+                {"error": str(exc)},
             )
 
     @staticmethod
@@ -398,15 +372,10 @@ class DataSourceOrchestrator:
         self, request: AnalysisRequest, *, run_id: str
     ) -> tuple[AggregatedIntelligence, dict[str, SourceStatus]]:
         logger = get_logger(__name__, run_id)
+
+        # Run enrichment and Gong concurrently. Gong is synchronous/instant so it
+        # completes while the Apollo enrichment HTTP call is in flight.
         enrich_task = asyncio.create_task(self.apollo_enrich.enrich_company(request, run_id=run_id))
-        contacts_task = asyncio.create_task(
-            self.apollo_contacts.search_contacts(
-                company_name=request.company_name,
-                domain=request.domain,
-                run_id=run_id,
-                limit=5,
-            )
-        )
 
         gong_start = perf_counter()
         calls = self.gong.find_calls(request.company_name, request.industry)
@@ -418,7 +387,23 @@ class DataSourceOrchestrator:
         )
 
         company_intel, enrich_status, enrich_raw = await enrich_task
-        contacts, contacts_status, contacts_raw = await contacts_task
+
+        # Use the domain Apollo returned for the company — it's the authoritative root
+        # domain (e.g. "stripe.com") and gives a precise contacts lookup. Fall back to
+        # whatever domain was on the original request if enrichment didn't return one.
+        search_domain = company_intel.primary_domain or request.domain
+        logger.info(
+            "Contacts search domain for %s: %s",
+            request.company_name,
+            search_domain or "(none — will use name match)",
+        )
+
+        contacts, contacts_status, contacts_raw = await self.apollo_contacts.search_contacts(
+            company_name=request.company_name,
+            domain=search_domain,
+            run_id=run_id,
+            limit=5,
+        )
         source_status = {
             "apollo_enrich": enrich_status,
             "apollo_contacts": contacts_status,
